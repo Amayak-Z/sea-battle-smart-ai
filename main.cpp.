@@ -1,0 +1,723 @@
+#include <iostream> // Стандартный ввод-вывод
+#include<time.h>// Для генерации случайных чисел (srand(time(NULL)))
+#include<windows.h>// Системные функции Windows (цвет, курсор)
+#include<cmath>// Математические функции
+#include<conio.h>// Для работы с клавиатурой (_getch)
+
+using namespace std;
+// --- НАСТРОЙКИ КОНСОЛИ (ГРАФИКА И УПРАВЛЕНИЕ) ---
+
+// Перечисление цветов для функции setColor
+enum Color { black, blue, green, cyan, red, magenta, brown, lightgray, darkgray, lightblue, lightgreen, lightcyan, lightred, lightmagenta, yellow, white };
+// Получение дескриптора окна консоли для управления атрибутами
+
+HANDLE hstdout = GetStdHandle(STD_OUTPUT_HANDLE);
+/*
+ * Функция смены цвета текста и фона в консоли.
+ * text - цвет символов, background - цвет заливки ячейки.
+ */
+void setColor(Color text, Color background)
+{
+	SetConsoleTextAttribute(hstdout, (WORD)((background << 4) | text));
+}// Перечисление кодов клавиш (ASCII/Scan-коды) для удобства чтения кода
+enum Direction { Up = 72, Left = 75, Right = 77, Down = 80, Enter = 13, Esc = 27 };
+
+HANDLE hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+/*
+ * Функция позиционирования курсора.
+ * Позволяет отрисовывать кадры игры в одном и том же месте без мерцания экрана.
+ */
+void setCursor(int x, int y)
+{
+	COORD myCoords = { x,y };//инициализируем передаваемыми значениями объект координат
+	SetConsoleCursorPosition(hStdOut, myCoords);
+}
+// --- ГЛОБАЛЬНЫЕ НАСТРОЙКИ И ДАННЫЕ ---
+const int R = 10;// Размер игрового поля (константа для удобного масштабирования)
+// Игровые поля (0 - пусто, 1 - корабль, 2 - промах, 3 - подбит)
+int moe[R][R] = { 0 };// Поле игрока
+int bot[R][R] = { 0 };// Поле компьютера (бота)
+
+int x = 0, y = 0;//координаты для прицела
+int cel = 0, boty = 0, botx = 0;//переменные для умного бота
+
+// "Якорь" бота: хранит координаты самого первого попадания в многопалубный корабль.
+// Позволяет боту возвращаться в центр и добивать корабль в другом направлении.
+int firsty = 0, firstx = 0;
+/*
+ * Отрисовка игрового поля в консоли.
+ * mas - массив данных, y/x - координаты прицела, k - флаг видимости кораблей.
+ */
+void pole(int moe[R][R], int vx, int vy, bool tuman)//отрисовка поле
+{
+	cout <<"   ";
+	for (int j = 1; j <= R; j++)
+	{
+		setColor(yellow, black);
+		if (j < 10)
+		{
+			
+			cout <<" "<< j <<" ";
+		}
+		else
+		{
+			cout << j << " ";
+			
+		}
+	}
+	cout << endl;
+	
+	for (int  i = 0; i < R; i++)
+	{
+		setColor(yellow, black);
+		if (i + 1 < 10)
+		{
+			
+			cout << " " << i+1  << " ";
+		}
+		else
+		{
+			cout << i +1 << " ";
+			
+		}
+		setColor(white, black);
+		
+		for (int j = 0; j < R; j++)
+		{
+			
+			
+			if (i == vy && j == vx)
+			{// Если координаты цикла совпали с y/x, рисуем прицел
+				setColor(red, black);
+				cout << "[+]";//рисуем прицел 
+				setColor(white, black);
+			}
+			else if (moe[i][j] == 1)
+			{
+				if (tuman == true)
+				{
+					setColor(cyan, black);
+					cout << " ~ ";
+					setColor(white, black);
+				}
+				else
+				{
+					setColor(green, black);
+					cout << " S ";// рисуем корабль
+					setColor(white, black);
+				}
+				
+			}
+			else if (moe[i][j] == 3)//попадание
+			{
+				setColor(red, black);
+				cout << " X ";
+				setColor(white, black);
+			}
+			else if (moe[i][j] == 2)
+			{
+				cout << " * ";//промах
+			}
+			
+			else
+			{
+				setColor(cyan, black);
+				cout << " ~ ";//иначе пусто
+				setColor(white, black);
+			}
+			
+		}
+		cout << "           "<<endl;
+	}
+	
+	if (tuman == false) // Если рисуем поле игрока (туман выключен)
+	{
+		cout << "=========== МОЕ ПОЛЕ ===========" << endl;
+	}
+	
+}
+/*
+ * Случайная расстановка кораблей для бота или игрока.
+ * Генерирует координаты до тех пор, пока не найдет свободное место.
+ */
+void auto_rast(int mas[R][R], int kol)
+{
+	int postavleno = 0;
+	while(postavleno<kol)//будем ставить пока количество не сравняется с поставленными кораблями
+	{
+		int vy = rand() % R;//ставим рандомно для строк и столбцов
+		int vx = rand() % R;
+		if (mas[vy][vx] == 0)//если место пустое ставим корабль
+		{
+			mas[vy][vx] = 1;
+			postavleno++;
+		}
+	}
+}
+/*
+ * Ручная расстановка кораблей игроком.
+ * Позволяет перемещать прицел и фиксировать положение палуб нажатием Enter.
+ */
+void stavlyusam(int mas[R][R], int skolko)
+{
+	int  postavleno = 0,tuman=0;// Счетчик уже установленных палуб
+	while (postavleno < skolko)
+	{
+		// Отрисовка поля с текущим положением прицела
+		setCursor(0, 0);
+		pole(mas, x, y,tuman);
+		int knopka = _getch();
+		
+		if (knopka == 224)// Обработка стрелок (двухбайтовый код)
+		{
+			knopka = _getch();
+			// Изменение координат x и y в зависимости от нажатой стрелки
+			if (knopka == 72&&y>0)//вверх
+			{
+				y--;
+			}
+			if (knopka == 80 && y < R - 1)//вниз
+			{
+				y++;
+			}
+			if (knopka == 75 && x > 0)//влево
+			{
+				x--;
+			}
+			if (knopka == 77 && x < R - 1)//вправо
+			{
+				x++;
+			}
+			
+		}
+		else if (knopka == 27)
+		{
+			system("cls");
+			exit(0);
+		}
+		else if (knopka == 13)//enter
+		{
+			if (mas[y][x] == 0)// Проверка: клетка должна быть пустой
+			{
+				mas[y][x] = 1;// Устанавливаем палубу
+				postavleno++;// Увеличиваем счетчик
+			}
+		}
+
+	}
+}
+/*
+ * Базовый алгоритм бота (Random AI).
+ * Используется на нормальном уровне сложности.
+ * Бот производит выстрелы в случайные координаты, не имея "памяти" о прошлых попаданиях.
+ */
+void Bot(int moyo_pole[R][R])
+{
+	int ry, rx;
+	// Цикл поиска подходящей цели
+	do
+	{
+		ry = rand() % R; // Генерация случайной строки
+		rx = rand() % R;// Генерация случайного столбца
+	} while (moyo_pole[ry][rx]>1);//если >1 значит либо промах либо уже бил продолжает искать
+	// Обработка результата выстрела
+		if (moyo_pole[ry][rx] == 1) // Если в случайной точке оказался корабль
+		{
+			moyo_pole[ry][rx] = 3; // Статус "подбит"
+			setColor(red, black);
+			cout << "        БОТ ПОПАЛ           " << endl;
+		}
+	else if (moyo_pole[ry][rx] == 0)// Если в точке пустая вода
+	{
+		moyo_pole[ry][rx] = 2;// Статус "промах"
+		setColor(green, black);
+		    cout << "        БОТ ПРОМАХ          " << endl;
+	}
+		setColor(white, black);
+	
+}
+/*
+* Логика хода игрока.
+* Позволяет перемещать прицел по полю врага и производить выстрел.
+* vrag - массив поля противника.
+*/
+void moy_hod(int vrag[R][R])
+	{
+	int vistrel = 0;// Флаг завершения хода (0 - целимся, 1 - выстрелили)
+	while(vistrel==0)// Цикл ожидания выстрела
+	{
+		
+		setCursor(0, 0);// Обновляем экран без мерцания (перенос курсора в начало)
+		cout << "===========ПОЛЕ ВРАГА===========" << endl;
+		// Отрисовка поля врага. 1 означает включенный "туман войны" (скрытие живых кораблей)
+		pole(vrag, x, y, 1);
+		
+		int knopka=_getch();
+		if (knopka == 224)// Обработка спецклавиш (стрелок)
+		{
+			knopka = _getch();// Получаем второй байт кода стрелки
+			if (knopka == 72 && y > 0)
+			{
+				y--;// Вверх (с проверкой границы)
+			}
+			if (knopka == 80 && y<R-1)
+			{
+				y++;// Вниз
+			}
+			if (knopka == 75 && x > 0)
+			{
+				x--;// Влево
+			}
+			if (knopka == 77 && x < R - 1)
+			{
+				x++;// Вправо
+			}
+
+			
+		}
+		else if (knopka == 27)// Клавиша ESC (выход из игры)
+		{
+			system("cls");
+			exit(0);
+		}
+		else if (knopka == 13)// Клавиша ENTER (выстрел)
+		{
+			if (vrag[y][x] > 1)// Проверка: не стреляли ли сюда ранее (2 или 3)
+			{
+				cout << "        сюда уже cтреляли        " << endl;
+				
+			}
+			else if (vrag[y][x]==1)// ПОПАДАНИЕ
+			{
+				vrag[y][x] = 3; // Меняем статус на "подбит"
+				vistrel = 1; // Ход окончен
+				setColor(green, black);
+				cout << "          ВЫ ПОПАЛИ          " << endl<<endl;
+			}
+			else if (vrag[y][x] == 0)
+			{
+				vrag[y][x] = 2;// Помечаем воду как обстрелянную
+				vistrel = 1;// Ход окончен
+				setColor(red, black);
+				cout << "          ВЫ ПРОМАЗАЛИ          " << endl<<endl;
+			}
+		}
+
+	}
+	setColor(white, black);// Сброс цвета в стандартный
+}
+/*
+ * Умный алгоритм бота (Smart AI)
+ * Реализует машину состояний: Поиск (Random) и Добивание (Target Hunt).
+ * Использует систему "якоря" для уничтожения многопалубных кораблей.
+ */
+void umniybot(int umbot[R][R])
+{
+	
+	if (cel == 0)// СОСТОЯНИЕ 0: Свободный поиск цели
+	{
+		do
+		{
+			boty = rand() % R;
+			botx = rand() % R;
+
+
+		} while (umbot[boty][botx] > 1);// Проверка: не стреляли ли сюда ранее
+		
+		if (umbot[boty][botx] == 1)// Первое попадание
+		{
+			umbot[boty][botx] = 3;
+			cel = 1;// Переход в режим добивания
+			firstx = botx;// Фиксация "якоря" (точки первого попадания)
+			firsty = boty;
+			setColor(red, black);
+			
+			cout << "        БОТ ПОПАЛ                   " << endl;
+		}
+		else
+		{
+			umbot[boty][botx] = 2;
+			cel = 0;
+			
+			setColor(green, black);
+			cout << "          БОТ ПРОМАХ          "<<endl;
+		}
+		// В режиме cel==0 выходим сразу, так как выстрел сделан
+	}
+	else if (cel == 1)// СОСТОЯНИЕ 1: Добивание обнаруженного корабля
+	{
+		bool proverka = false;// Флаг совершения выстрела в текущем ходу
+
+		// Проверка направлений: Вниз, Вверх, Влево, Вправо
+		// Используем логику "сканирования": стреляем только если видим палубу (== 1)
+		
+		// ВНИЗ
+		if (!proverka && boty + 1 < R && umbot[boty + 1][botx] ==1)
+		{
+			if (umbot[boty + 1][botx] == 1)
+			{
+				umbot[boty + 1][botx] = 3;
+				boty = boty + 1;// Смещение прицела вдоль линии корабля
+				cel = 1;
+				
+				setColor(red, black);
+				cout << "          БОТ ПОПАЛ          "<<endl;
+				proverka = true;
+				return;// Завершение хода после попадания
+			}
+			
+			
+		}
+		//ВВЕРХ
+		 if (!proverka && boty - 1 >=0 && umbot[boty - 1][botx]==1)
+		{
+			if (umbot[boty - 1][botx] ==1)
+			{
+				umbot[boty - 1][botx] = 3;
+				boty = boty - 1;// Смещение прицела вдоль линии корабля
+				cel = 1;
+				
+				setColor(red, black);
+				cout << "          БОТ ПОПАЛ          " << endl;
+				proverka = true;
+				return;// Завершение хода после попадания
+			}
+			
+			
+		}
+		 //ВЛЕВО
+		 if (!proverka && botx - 1 >=0 && umbot[boty][botx - 1]==1)
+		{
+			if (umbot[boty][botx - 1] == 1)
+			{
+				umbot[boty][botx - 1] = 3;
+				botx = botx - 1;// Смещение прицела вдоль линии корабля
+				cel = 1;
+			
+				setColor(red, black);
+				cout << "          БОТ ПОПАЛ          " << endl;
+				proverka = true;
+				return;// Завершение хода после попадания
+			}
+			
+			
+		}
+		 //ВПРАВО
+		 if (!proverka && botx + 1 < R && umbot[boty][botx + 1] ==1)
+		{
+			if (umbot[boty][botx + 1] == 1)
+			{
+				umbot[boty][botx + 1] = 3;
+				botx = botx + 1;// Смещение прицела вдоль линии корабля
+				cel = 1;
+				setColor(red, black);
+				cout << "          БОТ ПОПАЛ          "<<endl;
+				proverka = true;
+				return;// Завершение хода после попадания
+			}
+			
+			
+		}
+		 // ЛОГИКА ТУПИКА: Если вокруг текущей точки нет целых палуб
+		 if (!proverka)
+		 {
+			 if (boty != firsty || botx != firstx)
+			 {
+				 // Если мы ушли от начала, возвращаемся к "якорю" для проверки другой стороны
+				 boty = firsty;
+				 botx = firstx;
+				 umniybot(umbot);// Рекурсивный вызов: бот меняет направление в тот же ход
+				 return;
+			 }
+			 // Рекурсивный вызов обеспечивает непрерывность хода бота:
+// 1. Если текущая линия обстрела зашла в тупик — возвращаемся к "якорю" (firsty/firstx).
+// 2. Если корабль полностью уничтожен — сбрасываем цель (cel=0) и ищем новую.
+// Рекурсия завершится, как только в одном из режимов (0 или 1) будет выполнен реальный выстрел и сработает return.
+			 else
+			 {
+				 // Если и от "якоря" стрелять некуда — корабль полностью уничтожен
+				 cel = 0;
+				 umniybot(umbot);// Переход в режим поиска новой цели
+				 return;
+			 }
+		 }
+		
+		
+
+	}
+	setColor(white, black);
+}
+/*
+ * ГЛАВНАЯ ФУНКЦИЯ ИГРЫ
+ * Управляет жизненным циклом приложения: меню, настройки, игровой процесс и перезапуск.
+ */
+int main()
+{
+
+	system("cls");
+	setlocale(LC_ALL, "ru");// Поддержка кириллицы в консоли
+	srand(time(NULL));// Инициализация генератора случайных чисел
+	while (true)// Глобальный цикл для возможности начать игру заново
+	{
+		system("cls");
+		// СБРОС СОСТОЯНИЯ: Обнуление всех игровых переменных перед новой партией
+		x = 0, y = 0, cel = 0, botx = 0, boty = 0,firsty=0,firstx=0;
+		// Очистка игровых полей
+		for (int i = 0; i < R; i++)
+		{
+			for (int j = 0; j < R; j++) {
+				moe[i][j] = 0;
+				bot[i][j] = 0;
+			}
+		}
+	
+
+
+	int stroka = 0; // Курсор в меню
+	int level = 1;// Текущая сложность (1 - Нормально, 2 - Сложно)
+	// ИГРОВОЕ МЕНЮ: Выбор старта, сложности или выхода
+	while (true)
+	{
+
+
+		setCursor(0, 0);
+		cout << "   ===МЕНЮ===   " << endl;
+		if (stroka == 0)
+		{
+
+			cout << "-> СТАРТ     " << endl;
+
+		}
+		else
+		{
+			cout << "СТАРТ         " << endl;
+		}
+		if (stroka == 1)
+		{
+			cout << "-> СЛОЖНОСТЬ     ";
+
+		}
+		else
+		{
+			cout << "СЛОЖНОСТЬ          ";
+
+
+		}
+		if (level == 1)
+		{
+			cout << " НОРМАЛЬНО       " << endl;
+		}
+		else
+		{
+			cout << " СЛОЖНО       " << endl;
+		}
+		if (stroka == 2)
+		{
+			cout << "-> ВЫХОД       ";
+		}
+		else
+		{
+			cout << "    ВЫХОД   " << endl;
+		}
+
+		int knopka = _getch();
+		if (knopka == 224)// Навигация по меню стрелками
+		{
+			knopka = _getch();
+			switch (knopka)
+			{
+			case 72:
+				if (stroka > 0)
+				{
+					stroka--;// Вверх
+				}
+				break;
+			case 80:
+				if (stroka < 2)
+				{
+					stroka++;// Вниз
+					break;
+				}
+			}
+
+
+		}
+		else if (knopka == 13)
+		{
+			if (stroka == 0)
+			{
+				break;
+			}
+			if (stroka == 1)
+			{
+				if (level == 1)
+				{
+					level = 2;
+				}
+				else
+				{
+					level = 1;
+				}
+			}
+			if (stroka == 2)
+			{
+				exit(0);
+			}
+		}
+	}
+
+	system("cls");
+	// ВЫБОР РАССТАНОВКИ: Автоматическая или ручная
+	int vibor = 0;
+	while (true)
+	{
+		setCursor(0, 0);
+		cout << "===ВЫБОР РАССТАНОВКИ===" << endl;
+
+		if (vibor == 0)
+		{
+			cout << "->     В РУЧНУЮ     " << endl;
+		}
+		else
+		{
+			cout << "     В РУЧНУЮ     " << endl;
+		}
+		if (vibor == 1)
+		{
+			cout << "->     АВТО     " << endl;
+		}
+		else
+		{
+			cout << "     АВТО     " << endl;
+		}
+
+		int knopka = _getch();
+		if (knopka == 224)
+		{
+			knopka = _getch();
+			if (knopka == 72)
+			{
+				vibor = 0;
+			}
+			if (knopka == 80)
+			{
+				vibor = 1;
+			}
+		}
+		if (knopka == 13)
+		{
+			break;
+		}
+	}
+	system("cls"); // Чистим экран перед расстановкой
+	if (vibor == 0)
+	{
+		stavlyusam(moe, 20); // Вызываем ручную расстановку (X кораблей)
+	}
+	else
+	{
+		auto_rast(moe, 20);  // Вызываем автоматическую расстановку
+	}
+
+
+
+	if (level == 2)
+	{
+		auto_rast(bot, 30);
+	}
+	else
+	{
+		auto_rast(bot, 20);
+	}
+	cout << "Корабли расставлены! Нажмите любую клавишу, чтобы начать бой...";
+
+
+	int start;
+	// ГЛАВНЫЙ БОЕВОЙ ЦИКЛ : Продолжается, пока у обеих сторон есть корабли
+	do
+	{
+		start = _getch();
+		if (start == 27)
+		{
+			exit(0);
+		}
+
+	} while (start != 13);
+	system("cls");
+	int k_moe = 0;
+	int k_bot = 0;
+
+	do
+	{
+
+
+		moy_hod(bot);
+		if (level == 1) // Ход противника в зависимости от сложности
+		{
+			Bot(moe);
+		}
+		else
+		{
+			umniybot(moe);
+		}
+		setCursor(0, 13);
+		// Отображение текущего состояния своего поля после хода бота
+		setCursor(0, 15);
+		pole(moe, 15, 15, 0);// 15,15 - прячем прицел, 1 - показываем корабли
+		k_moe = 0;
+		k_bot = 0;
+		// Подсчет оставшихся живых палуб
+		for (int i = 0; i < R; i++)
+		{
+
+			for (int j = 0; j < R; j++)
+			{
+				if (moe[i][j] == 1)
+				{
+					k_moe++;
+				}
+				if (bot[i][j] == 1)
+				{
+					k_bot++;
+				}
+
+			}
+
+		}
+	} while (k_moe > 0 && k_bot > 0);
+	// ФИНАЛЬНЫЙ ЭКРАН: Определение победителя
+	system("cls");
+	if (k_bot == 0)
+	{
+		setColor(green, black);
+		cout << "                  ========================" << endl;
+		cout << "                  ||    ВЫ ВЫЙГРАЛИ     ||" << endl;
+		cout << "                  ========================" << endl;
+	}
+	else if (k_moe == 0)
+	{
+		setColor(red, black);
+		cout << "                   =========================" << endl;
+		cout << "                   ||    ВЫ ПРОИГРАЛИ     ||" << endl;
+		cout << "                   =========================" << endl;
+
+	}
+	setColor(white, black);
+	cout << " нажмите ENTER играть снова" << endl;
+	cout << " нажмите ESC закончить игру" << endl;
+
+	int key;
+	do
+	{
+		key = _getch();
+		if (key == 27)// Выход из бесконечного цикла while(true)
+		{
+			break;
+		}
+
+
+	} while (key != 13);
+	
+
+   }
+}
